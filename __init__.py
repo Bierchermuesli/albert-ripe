@@ -8,6 +8,7 @@ from albert import *
 import requests
 import re
 import ipaddress
+import os
 
 
 md_iid = "0.5"
@@ -22,6 +23,10 @@ md_authors = "@Bierchermuesli"
 md_lib_dependencies = ["request","ipaddress"]
 
 
+
+
+
+iconPath = os.path.dirname(__file__)+"/ripe_ncc.svg"
 
 
 class Plugin(QueryHandler): 
@@ -47,102 +52,157 @@ class Plugin(QueryHandler):
         except:
             return False
 
+    def ripe_api(self,uri,resource):
+        r = requests.get('https://stat.ripe.net/data/'+uri+'/data.json?resource='+resource).json()
+        return r
+
 
     def handleQuery(self,query):
     
+        ### For ASNs
+        as_regex = re.compile('^(?:as)?(?P<asn>\d{2,6})$', re.IGNORECASE)
+        results = []
 
-        as_regex = re.compile('^(?as)(\d{2,6})$', re.IGNORECASE)
+        if search := as_regex.match(query.string):
+            asn = search.group('asn')
+            r = self.ripe_api("as-overview",'as'+asn)
 
+            debug("WHOIS checking ASN: "+ str(asn))
 
-        """
-        try to find any query type flag or @ask-another-resolver option?
-        """
-        qname = query.string.split()[0]
-
-
-        if asn := as_regex.match(qname):
-            asn = asn[0]
-            r = requests.get('https://stat.ripe.net/data/as-overview/data.json?resource=as'+asn).json()
-
-            debug("WHOIS checking ASN: "+ str(query))
-            
             if r:
                 if r['messages']:
                     query.add(Item(
                         id = md_id, 
-                        text = str("whois "+ asn),
-                        subtext = ': '.join(r['messages'][0]),
+                        icon=[iconPath],
+                        text = r['messages'][0][0],
+                        subtext = r['messages'][0][1]
                     ))
                 query.add(Item(
                     id = md_id, 
                     text = "AS{resource} - {holder}".format(**r['data']),
                     subtext = "is announced" if r['data']['announced'] else "not announced",
+                    icon=[iconPath],
                     actions = [
                         Action("clip","Copy: AS{resource} - {holder}".format(**r['data']), lambda: setClipboardText("AS{resource} - {holder}".format(**r['data']))),
                         Action("url","Check PeeringDB",lambda: openUrl('https://www.peeringdb.com/search?q='+r['data']['resource']))
                         ]
                 ))
-
-            r = requests.get('https://stat.ripe.net/data/whois/data.json?resource=as'+asn).json()
-            if r:
-                for record in r['data']['records'][0]:
-                    query.add(Item(
-                    id = md_id, 
-                    text =  "{key}: {value}".format(**record),
-                    actions = [
-                        Action("clip","copy {key}: {value}".format(**record), lambda: setClipboardText(record['value'])),
-                        Action("clip","copy {value}".format(**record), lambda: setClipboardText(record['value'])),
-                        ]
-                    ))
-
-
-        elif self.is_prefix(qname):
-            r = requests.get('https://stat.ripe.net/data/prefix-overview/data.json?resource='+qname).json()
             
-            debug("WHOIS checking IP: "+ str(query))
+
+
+            r = self.ripe_api("whois",query.string)
+            if r:
+                for record in r['data']['records']:
+                    whois_str=""
+                    whois_substr=""
+                    for line in record:
+                        whois_str += "{key:15} {value}\n".format(**line)
+
+                        #interesting fields for subtext
+                        if line['key'] in ['as-name','org','source']:
+                            whois_substr += "{value} ".format(**line)
+
+
+                    query.add((Item(
+                    id = md_id, 
+                    text =  "{key}: {value}".format(**record[0]),
+                    subtext = whois_substr,
+                    icon= [os.path.dirname(__file__)+"/ripe_ncc-auth-num.svg"],
+                    actions = [
+                    Action("clip","copy {key} Object".format(**record[0]), lambda: setClipboardText(whois_str))
+                    ])))
+
+        ### For prefixes
+        elif self.is_prefix(query.string):
+            r = self.ripe_api("prefix-overview",query.string)
+            
+            debug("WHOIS checking IP: "+ str(query.string))
 
             if r:
                 if r['messages']:
                     query.add(Item(
                         id = md_id, 
-                        text = str("whois "+ qname),
-                        subtext = ': '.join(r['messages'][0]),
-                        # actions = [
-                        #     Action("clip","Network {}".format(addr.network_address), lambda: setClipboardText(str(addr.network_address))),
-                        #     ]
+                        icon=[iconPath],
+                        text = r['messages'][0][0],
+                        subtext = r['messages'][0][1]
                     ))
+
+                if r['see_also']:
+                    for see_also in r['see_also']:
+                        query.add(Item(
+                            id = md_id, 
+                            icon=[iconPath],
+                            text = see_also['resource'],
+                            subtext = "Relared as "+ see_also['relation'],
+                            actions = [Action("clip","Copy {}".format(see_also['resource']), lambda: setClipboardText(see_also['resource']))]
+                        ))
+                    
                 query.add(Item(
                     id = md_id, 
                     text = r['data']['resource'],
-                    subtext = r['data']['type'],
-                    # actions = [
-                    #     Action("clip","Network {}".format(addr.network_address), lambda: setClipboardText(str(addr.network_address))),
-                    #     ]
+                    subtext = "is announced" if r['data']['announced'] else "not announced",
+                    icon=[iconPath],
+                    actions = [Action("clip","Copy {}".format(r['data']['resource']), lambda: setClipboardText(r['data']['resource']))]
                 ))
                 for asn in r['data']['asns']:
                     query.add(Item(
                     id = md_id, 
-                    text = "{asn}: {holder}".format(**asn),
+                    text = "AS{asn}: {holder}".format(**asn),
+                    subtext = "announced by ^",
+                    icon=[os.path.dirname(__file__)+"/ripe_ncc-auth-num.svg"],
                     actions = [
-                        Action("clip","Copy {asn} {holder}".format(**asn), lambda: setClipboardText("{asn} {holder}".format(**asn))),
+                        Action("clip","Copy AS{asn} {holder}".format(**asn), lambda: setClipboardText("{asn} {holder}".format(**asn))),
                         Action("clip","Copy {holder}".format(**asn), lambda: setClipboardText(asn['holder'])),
                         Action("clip","Copy AS{asn}".format(**asn), lambda: setClipboardText("AS"+asn['asn'])),
                         Action("clip","Copy {asn}".format(**asn), lambda: setClipboardText(asn['asn'])),
                         ]
 
                     ))
-                
-                r = requests.get('https://stat.ripe.net/data/whois/data.json?resource='+qname).json()
+
+
+                #make a whois query
+                r = self.ripe_api("whois",query.string)
                 if r:
-                    for record in r['data']['records'][0]:
+                    for record in r['data']['records']:
+                        whois_str=""
+                        whois_substr=""
+                        for line in record:
+                            whois_str += "{key:15} {value}\n".format(**line)
+
+                            #interesting fields for subtext
+                            if line['key'] in ['inetnum','netname','inetnum6','status','country','source']:
+                                whois_substr += "{value} ".format(**line)
+
                         query.add(Item(
                         id = md_id, 
-                        text =  "{key}: {value}".format(**record),
-                    actions = [
-                        Action("clip","copy {key}: {value}".format(**record), lambda: setClipboardText(record['value'])),
-                        Action("clip","copy {value}".format(**record), lambda: setClipboardText(record['value'])),
-                        ]
+                        text =  "{key}: {value}".format(**record[0]),
+                        subtext = whois_substr,
+                        icon=[iconPath],
+                        actions = [
+                        Action("clip","copy {key} Object".format(**record[0]), lambda: setClipboardText(whois_str))
+                        ]))
 
-                        ))
+                    whois_str=""
+                    whois_substr=""
+                    for record in r['data']['irr_records']:
+                        whois_str=""
+                        whois_substr=""
+                        actions = []
+                        for line in record:
+                            whois_str += "{key:15} {value}\n".format(**line)
+
+                            #interesting fields for subtext
+                            if line['key'] in ['origin']:              
+                                whois_substr += "Origin AS{value}".format(**line)
+                                actions.append(Action("clip","Copy 'AS{value}'".format(**line),lambda: setClipboardText("AS{value}".format(**line))))
+                                actions.append(Action("clip","Copy '{value}'".format(**line),lambda: setClipboardText("{value}".format(**line))))
 
 
+                        actions.append(Action("clip","copy {key} Object".format(**record[0]), lambda: setClipboardText(whois_str)))
+
+                        query.add(Item(
+                        id = md_id, 
+                        text =  "{key}: {value}".format(**record[0]),
+                        subtext = whois_substr,
+                        icon=["xdg:copyq"],
+                        actions = actions))

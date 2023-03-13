@@ -1,0 +1,82 @@
+---
+#This is the Default config, do not override or delete this file.
+# make a copy to. ~/.config/albert/RIPE-Whois.yaml
+
+asn_url:
+ bgp.tools: https://bgp.tools/as/{}
+ HE.net Toolkit: https:// bgp.he.net/{}
+ PeeringDB: https://www.peeringdb.com/search?q={}
+prefix_url:
+ CloudFlare RPKI: https://rpki.cloudflare.com/?view=bgp&prefix={}
+ bgp.tools: https://bgp.tools/prefix/{}
+ HE.net Toolkit: https://bgp.he.net/net/{}
+ Telia LG: https://lg.twelve99.net/?type=bgp&router=zch-b1&address={}
+
+#internal ASNs or overrides
+custom_as:
+  23456:
+      name: "AS_TRANS RFC6793"
+      info: "2 to 4 byte ASN migrations, should not appear in your path..."
+      url:  "https://www.rfc-editor.org/rfc/rfc4893"
+
+custom_prefix:
+    10.0.0.0/8:
+      name: "RFC1918"
+      info: "Private /8"
+      url: "https://datatracker.ietf.org/doc/html/rfc1918"
+    172.16.0.0/12:
+      name: "RFC1918"
+      info: "Private /12"
+      url: "https://datatracker.ietf.org/doc/html/rfc1918"
+    192.0.0.0/24:
+      name: "RFC1918"
+      info: "Private /24"
+      url: "https://datatracker.ietf.org/doc/html/rfc1918"
+    100.64.0.0/10:
+      name: "Provider Range"
+      info: "CGN and stuff"
+      url: "https://datatracker.ietf.org/doc/html/rfc6598"
+    169.254.0.0/16:
+      name: "APIPA"
+      info: "Dynamic Configuration of IPv4 Link-Local Addresses"
+      url: https://datatracker.ietf.org/doc/html/rfc3927
+    192.0.2.0/24:
+      name: "TEST-NET-1"
+      info: "Documentary Range"
+      url: "https://www.rfc-editor.org/rfc/rfc5737"
+    198.51.100.0/24:
+      name: "TEST-NET-2"
+      info: "Documentary Range"
+      url: "https://www.rfc-editor.org/rfc/rfc5737"
+    203.0.113.0/24:
+      name: "TEST-NET-3"
+      info: "Documentary Range"
+      url: "https://www.rfc-editor.org/rfc/rfc5737"
+    198.18.0.0/15:
+      name: "Benchmark"
+      info: "This Documentary range is for Benchmarking"
+
+#do any DNS revers pointer if IP or /32 prefix
+show_ptr: True
+#do whois lookups
+show_whois: True
+# list parent ASN or Prefix Blocks like 
+#  IP 1.0.0.0/8 IANA IPv4 Address Space Registry
+#  AS Block 3154-3353 - Assigned by RIPE NCC
+show_rir_blocks: False
+
+famous_objects:
+    - aut-num
+    - route
+    - route6
+    - inetnum
+    - inet6num
+    - ASNumber #ARIN Stuff
+famous_attributes:
+    - as-name
+    - org
+    - source
+    - origin
+    - ASNumber #ARIN Stuff
+    - RTechName #ARIN Stuff
+    - ASName #ARIN Stuff

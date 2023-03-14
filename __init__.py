@@ -429,13 +429,14 @@ class Plugin(QueryHandler):
                             id = "auth",
                             text = "AS{asn}: {holder}".format(**asn),
                             subtext = "announced by ^",
-                            icon=[plugin_root+"/icon/aut-num.svg"],
+                            icon=[icon_default],
                             actions = actions
                         ))
                               
                     #make a whois query
                     r = self.ripe_api("whois",query.string)
-                    if r:
+                    if r:                       
+                        
                         for datatype in r['data']:
                         #loop over  all data elements
 
@@ -489,23 +490,6 @@ class Plugin(QueryHandler):
                                         subtext = whois_substr,
                                         icon=[record_icon],
                                         actions = actions))
-
-                            #         else:
-                            #             #some unknown list element
-                            #             query.add(Item(
-                            #             id = md_id,
-                            #             text =  "FINISH1 "+ record,
-                            #             subtext = datatype,
-                            #             icon=[icon_default],
-                            #             actions = [Action("clip","Copy "+record, lambda v=record: setClipboardText(v))]))
-                            # else:
-                            #     #some unknown string elements
-                            #     query.add(Item(
-                            #     id = md_id,
-                            #     text =  "FINISH2 "+ r['data'][datatype],
-                            #     subtext = datatype,
-                            #     icon=[icon_default],
-                            #     actions = [Action("clip","Copy"+r['data'][datatype], lambda: setClipboardText(r['data'][datatype]))]))
 
             else:
 

@@ -28,9 +28,9 @@ custom_prefix:
       name: "RFC1918"
       info: "Private /12"
       url: "https://datatracker.ietf.org/doc/html/rfc1918"
-    192.0.0.0/24:
+    192.168.0.0/16:
       name: "RFC1918"
-      info: "Private /24"
+      info: "Private /16"
       url: "https://datatracker.ietf.org/doc/html/rfc1918"
     100.64.0.0/10:
       name: "Provider Range"

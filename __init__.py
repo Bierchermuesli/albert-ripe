@@ -90,7 +90,7 @@ class Plugin(QueryHandler):
 
 
     def ripe_api(self,uri,resource):
-        headers = {'User-agent': 'Albert launcher'}
+        headers = {'User-agent': 'Albert Launcher'}
         try:
             r = requests.get('https://stat.ripe.net/data/'+uri+'/data.json?resource='+resource,headers = headers,timeout=1)
             if r.status_code == 200 and r.headers["content-type"].strip().startswith("application/json"):
@@ -177,7 +177,7 @@ class Plugin(QueryHandler):
                         #default copy actions
                         actions = [
                                 # Action("clip","Copy: 'AS{resource} - {holder}'".format(**r['data']), lambda: setClipboardText("AS{resource} - {holder}".format(**r['data']))),
-                                Action("clip","Copy: '{holder}'".format(**r['data']), lambda: setClipboardText(r['data']['holder']))
+                                Action("clip","Copy: '{holder}'".format(**r['data']), lambda v=r['data']['holder']: setClipboardText(v))
                                 ]
                         #assemble custom ASN URL
                         for name,url in self.config['asn_url'].items():
@@ -290,8 +290,8 @@ class Plugin(QueryHandler):
                                     text =  ptr,
                                     subtext = prefix.reverse_pointer,
                                     actions = [
-                                        Action("clip","Copy '{}'".format(ptr), lambda: setClipboardText(ptr)),
-                                        Action("clip","Copy '{}'".format(prefix.reverse_pointer), lambda: setClipboardText(prefix.reverse_pointer))
+                                        Action("clip","Copy '{}'".format(ptr), lambda v=ptr: setClipboardText(v)),
+                                        Action("clip","Copy '{}'".format(prefix.reverse_pointer), lambda v=prefix.reverse_pointer: setClipboardText(v))
                                     ]
                                 )    
                         except Exception:
@@ -383,7 +383,7 @@ class Plugin(QueryHandler):
 
                     #the main "resource" aka prefix starts finlay added next
                     #copy option is first and default
-                    actions = [Action("clip","Copy {}".format(r['data']['resource']), lambda: setClipboardText(r['data']['resource']))]
+                    actions = [Action("clip","Copy {}".format(r['data']['resource']), lambda v=r['data']['resource']: setClipboardText(v))]
 
                     #assemble custom URL
                     for name,url in self.config['prefix_url'].items():

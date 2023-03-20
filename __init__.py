@@ -13,12 +13,10 @@ from ipaddress import ip_network, ip_address,IPv4Address,IPv6Address
 import os
 from time import sleep
 from dns import resolver
-import collections
-
 
 
 md_iid = "0.5"
-md_version = "1.3"
+md_version = "1.4"
 md_id = "w"
 md_name = "RIPE-Whois"
 md_description = "whois like lookup with RIPE API"
@@ -119,6 +117,9 @@ class Plugin(QueryHandler):
                     subtext = self.config['custom_as'][asn]['info']
                     url = self.config['custom_as'][asn]['url']
                 # next AS ranges are more handy than external yaml :)
+                elif asn == 23456:
+                    text = "AS_TRANS RFC6793"
+                    subtext = "2 to 4 byte ASN migrations, should not appear in your path..."
                 elif asn in range(64496,64511+1) or asn in range(65536,65551+1):
                     private = "RFC5398"
                     subtext = "AS Number Reservation for Documentation Use"
@@ -136,9 +137,8 @@ class Plugin(QueryHandler):
                     subtext = "Not assignet (yet?)"
                     url = "https://www.iana.org/assignments/as-numbers/as-numbers.xhtml"
 
-                #return if private ASN (skipp any API query necessary)
+                #return if private ASN (do not ask any external API)
                 if private:
-                    debug("its a private ASN")
                     return query.add(Item(
                         id = "privateasn",
                         text = private,
@@ -160,6 +160,7 @@ class Plugin(QueryHandler):
                 r = self.ripe_api("as-overview",'as'+str(asn))
                 if r:
                     if r['messages']:
+                        #re-assamble some information
                         for m in r['messages']:
                             query.add(Item(
                                 id = md_id,
@@ -172,7 +173,7 @@ class Plugin(QueryHandler):
                     if r['status_code'] != 200:
                         return
 
-                    #append some stats data we found
+                    #append some stats we found
                     if 'data' in r:
                         #default copy actions
                         actions = [
@@ -183,6 +184,7 @@ class Plugin(QueryHandler):
                         for name,url in self.config['asn_url'].items():
                             actions.append(Action("url","Open {}".format(name),lambda u=url.format(r['data']['resource']): openUrl(u)))
 
+                        #add the AS item
                         query.add(Item(
                             id = "as",
                             text = "AS{resource} - {holder}".format(**r['data']),
@@ -191,7 +193,7 @@ class Plugin(QueryHandler):
                             actions = actions
                         ))
 
-                        #Block details
+                        #ASN Block details if enabled
                         if 'block' in r['data'] and self.config['show_rir_blocks']:
                             query.add(Item(
                             id = "block",
@@ -223,8 +225,9 @@ class Plugin(QueryHandler):
                             return
 
                     if 'data' in w:
+                        #loop over all whois results
                         for record in w['data']['records']:
-                            #a whois-like object string is assambled with multiple strings below
+                            #a whois-like object string is assembled with multiple strings below
                             whois_str=""
                             whois_substr=""
                             actions = []
@@ -235,7 +238,7 @@ class Plugin(QueryHandler):
                             else:
                                 record_icon = plugin_root+"/icon/whois.svg"
 
-                                #we always add a Copy option for first kv pair for (for famous objects there is always a famous attribut added below
+                                #we always add a Copy option for first kv pair for (not nessesary for famous objects as they have famous attributes)
                                 actions.append(
                                     Action("clip-first","Copy '{value}'".format(**record[0]), lambda v="{value}".format(**record[0]): setClipboardText(v))
                                 )
@@ -244,16 +247,18 @@ class Plugin(QueryHandler):
                                 #assamble whois object
                                 whois_str += "{key:15} {value}\n".format(**line)
 
-                                #look for interesting fields for subtext and Copy action
+                                #look for interesting attributes for subtext and Copy action
                                 if line['key'] in self.config['famous_attributes']:
                                     whois_substr += "{value} ".format(**line)
 
-                                    #never add source as copy option, its boring
+                                    #never add source as copy option, nobody need this
                                     if line['key'] == 'source': continue
                                     actions.append(Action("clip","Copy '{value}'".format(**line), lambda v=line['value']: setClipboardText(v)))
-
+                            
+                            # whois object is complete, add it as first copy option
                             actions.insert(0,Action("clip-object","Copy Whois Object", lambda: setClipboardText(whois_str)))
 
+                            #add the record as a item
                             query.add((Item(
                                 id = record[0]['key'],
                                 text =  "{key}: {value}".format(**record[0]),
@@ -270,20 +275,22 @@ class Plugin(QueryHandler):
             # ====================
             # :: Prefix Search
             # ====================
+            # prefix search is similar than ASN. Based on a overview and whois API query. Although the output is slightly different - a bit of redundant code here... :/
             elif prefix := self.is_prefix_or_address(query.string):
                 private=None
                 ptr=False
 
-                #if net or address
+                #in case of a Host address /32 or no CIDR
                 if type(prefix)==IPv4Address or type(prefix)==IPv6Address:
 
-                    #check if the ip is part of a custom prefix
+                    #check if the ip is part of a custom prefix, we need to know the key of the custom_prefix list
                     custom_index = [x for x in self.config['custom_prefix'].keys() if prefix in ip_network(x,strict=False)]
 
-                    #check PTR if enabled but dont care much...
+                    #check PTR if enabled but dont care much, just pass any exception.
                     if self.config['show_ptr']:
                         try:
                             if ptr := str(resolver.query(prefix.reverse_pointer,"PTR")[0]):
+                                #prepare a ptr item, it will be added later. 
                                 ptr = Item(
                                     id = "ptr",
                                     icon=[plugin_root+"/icon/ptr.svg"],
@@ -297,10 +304,10 @@ class Plugin(QueryHandler):
                         except Exception:
                             pass
                 else:
-                    # ... comparision is different if network type
+                    # in case of a Prefix (the comparision is slightly different)
                     custom_index = [x for x in self.config['custom_prefix'].keys() if prefix.subnet_of(ip_network(x,strict=False))]
 
-                #check for any Private Address
+                #check if the ip belongs to a private or custom_prefix list. 
                 if custom_index:         
                     i = custom_index[-1] #we care the last, lest specific one
                     private = self.config['custom_prefix'][i]['name']
@@ -331,7 +338,7 @@ class Plugin(QueryHandler):
                     subtext = "a unspecified address as defined in RFC 2373 2.5.2."
                     url = "https://www.rfc-editor.org/rfc/rfc2373"
                     
-                # if the prefix is private return here already and skipp any API lookup
+                # if the prefix is private return here and skip any API lookup
                 if private:
                     query.add(Item(
                             id = "private",
@@ -347,7 +354,12 @@ class Plugin(QueryHandler):
                     if ptr: query.add(ptr)
                     return
 
-
+                #short delay before we ask the API
+                for number in range(50):
+                    sleep(0.01)
+                    if not query.isValid:
+                        return
+                    
                 debug("Checking API for IP: "+ str(prefix))
                 r = self.ripe_api("prefix-overview",str(prefix))
                 if r:
@@ -365,11 +377,9 @@ class Plugin(QueryHandler):
                     
                     # Add some related Prefixes
                     if r['see_also']:
-                        # Loop over related prefixes
                         for see_also in r['see_also']:
-
                             actions = [Action("clip","Copy {}".format(see_also['resource']), lambda: setClipboardText(see_also['resource']))]
-                            #assemble custom URL
+                            #assemble any custom URL
                             for name,url in self.config['prefix_url'].items():
                                 actions.append(Action("url","Open {}".format(name),lambda u=url.format(r['data']['resource']): openUrl(u)))
 
@@ -381,14 +391,15 @@ class Plugin(QueryHandler):
                                 actions = actions
                             ))
 
-                    #the main "resource" aka prefix starts finlay added next
+                    #lets prepare the main prefix item now...
                     #copy option is first and default
                     actions = [Action("clip","Copy {}".format(r['data']['resource']), lambda v=r['data']['resource']: setClipboardText(v))]
 
                     #assemble custom URL
                     for name,url in self.config['prefix_url'].items():
                         actions.append(Action("url","Open {}".format(name),lambda u=url.format(r['data']['resource']): openUrl(u)))
-
+                    
+                    #add the prefix item
                     query.add(Item(
                         id = "origin",
                         text = r['data']['resource'],
@@ -400,6 +411,7 @@ class Plugin(QueryHandler):
                     #add the PTR item if any
                     if ptr: query.add(ptr)
 
+                    #any block details ifi enabled
                     if 'block' in r['data'] and self.config['show_rir_blocks']:
                         query.add(Item(
                         id = "block",
@@ -412,7 +424,6 @@ class Plugin(QueryHandler):
                             Action("clip","Copy "+r['data']['block']['desc'], lambda v=r['data']['block']['desc']: setClipboardText(v)),
                             ]
                         ))
-
 
                     #add related ASN's
                     for asn in r['data']['asns']:
@@ -439,7 +450,6 @@ class Plugin(QueryHandler):
                         
                         for datatype in r['data']:
                         #loop over  all data elements
-
                             if type(r['data'][datatype]) is list:
                                 #loop over all list elements (like irr_records and records)
                                 for record in r['data'][datatype]:

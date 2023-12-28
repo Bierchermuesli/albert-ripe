@@ -6,10 +6,14 @@ asn_url:
  bgp.tools: https://bgp.tools/as/{}
  HE.net Toolkit: https:// bgp.he.net/{}
  PeeringDB: https://www.peeringdb.com/search?q={}
+ CF RPKI: https://rpki.cloudflare.com/?view=bgp&asn={}
+ IRR Explorer: https://irrexplorer.nlnog.net/asn/AS{}
 prefix_url:
  CloudFlare RPKI: https://rpki.cloudflare.com/?view=bgp&prefix={}
  bgp.tools: https://bgp.tools/prefix/{}
  HE.net Toolkit: https://bgp.he.net/net/{}
+ CF RPKI: https://rpki.cloudflare.com/?view=bgp&prefix={}
+ IRR Explorer: https://irrexplorer.nlnog.net/prefix/{}
  Telia LG: https://lg.twelve99.net/?type=bgp&router=zch-b1&address={}
 
 #internal ASNs or overrides
@@ -55,6 +59,7 @@ custom_prefix:
     198.18.0.0/15:
       name: "Benchmark"
       info: "This Documentary range is for Benchmarking"
+      url: "https://www.rfc-editor.org/rfc/rfc5735"
 
 #do any DNS revers pointer if IP or /32 prefix
 show_ptr: True
@@ -71,13 +76,17 @@ famous_objects:
     - route6
     - inetnum
     - inet6num
-    - ASNumber #ARIN Stuff
+    - ASNumber #ARIN equivalent of aut-num
 famous_attributes:
     - as-name
     - org
     - source
     - origin
     - netname
-    - ASNumber #ARIN Stuff
-    - RTechName #ARIN Stuff
-    - ASName #ARIN Stuff
+    - ASNumber #ARIN Attributes
+    - RTechName #ARIN Attributes
+    - ASName #ARIN Attributes
+
+#if you are a heavy user (>100 requests a day) the RIPE policy suggests your own API Token (aka sourceapp)
+# see https://stat.ripe.net/docs/02.data-api/
+# sourceapp: 

@@ -3,7 +3,8 @@
 
 yes, this code could be nicer...
 
-Synopsis: <trigger> ASN/Prefix"""
+Synopsis: <trigger> ASN/Prefix
+"""
 
 from albert import *
 import requests
@@ -13,10 +14,11 @@ from ipaddress import ip_network, ip_address,IPv4Address,IPv6Address
 import os
 from time import sleep
 from dns import resolver
+from pathlib import Path
 
 
-md_iid = "0.5"
-md_version = "1.4"
+md_iid = "2.1"
+md_version = "1.5"
 md_id = "w"
 md_name = "RIPE-Whois"
 md_description = "whois like lookup with RIPE API"
@@ -26,47 +28,42 @@ md_maintainers = "@Bierchermuesli"
 md_authors = "@Bierchermuesli"
 md_lib_dependencies = ["request","ipaddress"]
 
-plugin_root = os.path.dirname(__file__)
-icon_default = plugin_root+"/icon.svg"
 
-class Plugin(QueryHandler):
+class Plugin(PluginInstance, GlobalQueryHandler):
 
-    def id(self):
-        return md_id
+    icon_default = [f"file:{Path(__file__).parent}/icon.svg"]
 
-    def name(self):
-        return md_name
-
-    def description(self):
-        return md_description
+    def __init__(self):
+        GlobalQueryHandler.__init__(self,
+                                    id=md_id,
+                                    name=md_name,
+                                    description=md_description,
+                                    defaultTrigger='w ')
+        PluginInstance.__init__(self, extensions=[self])
 
     def initialize(self):
         debug("initialize Regexes")
         self.as_regex = re.compile('^(?:as)?(?P<asn>\d{2,6})$', re.IGNORECASE)
 
-        config = os.path.dirname(__file__)+"/config-defaults.yaml"
-        debug('Load Default Config '+config)
-        default = self.load_yaml(config)
+        config_file = Path(__file__).parent.joinpath("config-defaults.yaml")
+        debug('Load Default Config: '+str(config_file))
+        default_config = self.load_yaml(config_file)
 
+        config_file = self.configLocation.joinpath("config.yaml")
+        debug("Load user_config (if any): "+ str(config_file))
+        user_config = self.load_yaml(config_file)
 
-        config = configLocation()+"/"+md_name+".yaml"
-        debug("Load User Config (if any)"+ config)
-        user = self.load_yaml(config)
-
-        #simple merge
-        for k, v in default.items():
-            if k in user:
-                user[k].update(v)
-                debug(v)
+        #simple config merge
+        for k, v in default_config.items():
+            if k in user_config:
+                user_config[k].update(v)
             else:
-                # debug(v)
-                user[k] = v
-        self.config = user
-        # debug(self.config)
+                user_config[k] = v
+        self.config = user_config
 
     def load_yaml(self,file):
         """ loads a yaml file - if exist"""
-        if os.path.isfile(file):
+        if file.is_file():
             try:
                 with open(file) as pointer:
                     return yaml.load(pointer, Loader=yaml.SafeLoader)
@@ -86,9 +83,8 @@ class Plugin(QueryHandler):
             except ValueError:
                 return False
 
-
     def ripe_api(self,uri,resource):
-        headers = {'User-agent': 'Albert Launcher'}
+        headers = {'user_config-agent': 'Albert Launcher'}
         try:
             r = requests.get('https://stat.ripe.net/data/'+uri+'/data.json?resource='+resource,headers = headers,timeout=1)
             if r.status_code == 200 and r.headers["content-type"].strip().startswith("application/json"):
@@ -100,8 +96,7 @@ class Plugin(QueryHandler):
         except requests.exceptions.Timeout as err:
             return {'messages': [['Slow Down!', str(err)]], 'status_code':500}
 
-
-    def handleQuery(self,query):
+    def handleTriggerQuery(self,query):
         if query.isValid:
 
             # ====================
@@ -139,11 +134,11 @@ class Plugin(QueryHandler):
 
                 #return if private ASN (do not ask any external API)
                 if private:
-                    return query.add(Item(
+                    return query.add(StandardItem(
                         id = "privateasn",
                         text = private,
                         subtext = subtext,
-                        icon=[icon_default],
+                        iconUrls=self.icon_default,
                         actions = [
                             Action("clip","Copy '{}'".format(private), lambda: setClipboardText(text)),
                             Action("clip","Copy '{}'".format(subtext), lambda: setClipboardText(subtext)),
@@ -162,9 +157,9 @@ class Plugin(QueryHandler):
                     if r['messages']:
                         #re-assamble some information
                         for m in r['messages']:
-                            query.add(Item(
+                            query.add(StandardItem(
                                 id = md_id,
-                                icon=[icon_default],
+                                iconUrls=self.icon_default,
                                 text = m[0],
                                 subtext = m[1],
                                 actions = [Action("clip","Copy messsage", lambda: setClipboardText(m[1]))]
@@ -185,21 +180,21 @@ class Plugin(QueryHandler):
                             actions.append(Action("url","Open {}".format(name),lambda u=url.format(r['data']['resource']): openUrl(u)))
 
                         #add the AS item
-                        query.add(Item(
+                        query.add(StandardItem(
                             id = "as",
                             text = "AS{resource} - {holder}".format(**r['data']),
                             subtext = "is announced" if r['data']['announced'] else "not announced",
-                            icon=[icon_default],
+                            iconUrls=self.icon_default,
                             actions = actions
                         ))
 
                         #ASN Block details if enabled
                         if 'block' in r['data'] and self.config['show_rir_blocks']:
-                            query.add(Item(
+                            query.add(StandardItem(
                             id = "block",
                             text = "AS Block {resource} - {desc}".format(**r['data']['block']),
                             subtext = r['data']['block']['name'],
-                            icon=[icon_default],
+                            iconUrls=self.icon_default,
                             actions = [
                                 Action("clip","Copy "+r['data']['block']['resource'], lambda v=r['data']['block']['resource']: setClipboardText(v)),
                                 Action("clip","Copy "+r['data']['block']['name'], lambda v=r['data']['block']['name']: setClipboardText(v)),
@@ -213,9 +208,9 @@ class Plugin(QueryHandler):
 
                     if w['messages']:
                         for m in r['messages']:
-                            query.add(Item(
+                            query.add(StandardItem(
                                 id = md_id,
-                                icon=[icon_default],
+                                iconUrls=self.icon_default,
                                 text = m[0],
                                 subtext = m[1],
                                 actions = [Action("clip","Copy messsage", lambda: setClipboardText(m[1]))]
@@ -234,9 +229,9 @@ class Plugin(QueryHandler):
 
                             #assign a icon on well known attributes
                             if record[0]['key'] in self.config['famous_objects']:
-                                record_icon = plugin_root+"/icon/"+record[0]['key'].lower()+".svg"
+                                record_icon = [f"file:{Path(__file__).parent}/icon/"+record[0]['key'].lower()+".svg"]
                             else:
-                                record_icon = plugin_root+"/icon/whois.svg"
+                                record_icon = [f"file:{Path(__file__).parent}/icon/whois.svg"]
 
                                 #we always add a Copy option for first kv pair for (not nessesary for famous objects as they have famous attributes)
                                 actions.append(
@@ -259,18 +254,18 @@ class Plugin(QueryHandler):
                             actions.insert(0,Action("clip-object","Copy Whois Object", lambda: setClipboardText(whois_str)))
 
                             #add the record as a item
-                            query.add((Item(
+                            query.add((StandardItem(
                                 id = record[0]['key'],
                                 text =  "{key}: {value}".format(**record[0]),
                                 subtext = whois_substr,
-                                icon= [record_icon,],
+                                iconUrls= record_icon,
                                 actions = actions )))
                 else:
-                    return query.add(Item(
+                    return query.add(StandardItem(
                         id = md_id,
                         text = "ASN not found",
                         subtext = w,
-                        icon=[icon_default]))
+                        iconUrls=self.icon_default))
 
             # ====================
             # :: Prefix Search
@@ -286,14 +281,14 @@ class Plugin(QueryHandler):
                     #check if the ip is part of a custom prefix, we need to know the key of the custom_prefix list
                     custom_index = [x for x in self.config['custom_prefix'].keys() if prefix in ip_network(x,strict=False)]
 
-                    #check PTR if enabled but dont care much, just pass any exception.
+                    #check PTR if enabled but don't care much, just pass any exception.
                     if self.config['show_ptr']:
                         try:
                             if ptr := str(resolver.query(prefix.reverse_pointer,"PTR")[0]):
                                 #prepare a ptr item, it will be added later. 
-                                ptr = Item(
+                                ptr = StandardItem(
                                     id = "ptr",
-                                    icon=[plugin_root+"/icon/ptr.svg"],
+                                    iconUrls=[f"file:{Path(__file__).parent}/icon/ptr.svg"],
                                     text =  ptr,
                                     subtext = prefix.reverse_pointer,
                                     actions = [
@@ -309,13 +304,13 @@ class Plugin(QueryHandler):
 
                 #check if the ip belongs to a private or custom_prefix list. 
                 if custom_index:         
-                    i = custom_index[-1] #we care the last, lest specific one
+                    i = custom_index[0] #atm we care about the first hit
                     private = self.config['custom_prefix'][i]['name']
                     subtext = self.config['custom_prefix'][i]['info']
                     url = self.config['custom_prefix'][i]['url']          
-                # next checks are backup if yaml is missing/overwritten  
+                # next checks RFC ranges (hard coded backup if yaml is missing/overwritten)
                 elif prefix.is_link_local:
-                    private = "Link Local"
+                    private = "Link Local"  
                     subtext = "a link Local as RFC 4291"
                     url = "https://www.rfc-editor.org/rfc/rfc4291"
                 elif prefix.is_loopback:
@@ -340,11 +335,11 @@ class Plugin(QueryHandler):
                     
                 # if the prefix is private return here and skip any API lookup
                 if private:
-                    query.add(Item(
+                    query.add(StandardItem(
                             id = "private",
                             text = private,
                             subtext = subtext,
-                            icon=[icon_default],
+                            iconUrls=self.icon_default,
                             actions = [
                                 Action("clip","Copy '{}'".format(private), lambda: setClipboardText(private)),
                                 Action("clip","Copy '{}'".format(subtext), lambda: setClipboardText(subtext)),
@@ -365,9 +360,9 @@ class Plugin(QueryHandler):
                 if r:
                     #add some informative Message - if any
                     if r['messages']:
-                        query.add(Item(
+                        query.add(StandardItem(
                             id = "info",
-                            icon=[icon_default],
+                            iconUrls=self.icon_default,
                             text = r['messages'][0][0],
                             subtext = r['messages'][0][1]
                         ))
@@ -383,9 +378,9 @@ class Plugin(QueryHandler):
                             for name,url in self.config['prefix_url'].items():
                                 actions.append(Action("url","Open {}".format(name),lambda u=url.format(r['data']['resource']): openUrl(u)))
 
-                            query.add(Item(
+                            query.add(StandardItem(
                                 id = "seealso",
-                                icon=[icon_default],
+                                iconUrls=self.icon_default,
                                 text = see_also['resource'],
                                 subtext = "Related as "+ see_also['relation'],
                                 actions = actions
@@ -400,24 +395,24 @@ class Plugin(QueryHandler):
                         actions.append(Action("url","Open {}".format(name),lambda u=url.format(r['data']['resource']): openUrl(u)))
                     
                     #add the prefix item
-                    query.add(Item(
+                    query.add(StandardItem(
                         id = "origin",
                         text = r['data']['resource'],
                         subtext = "is announced" if r['data']['announced'] else "not announced",
-                        icon=[icon_default],
+                        iconUrls=self.icon_default,
                         actions = actions
                     ))
 
                     #add the PTR item if any
                     if ptr: query.add(ptr)
 
-                    #any block details ifi enabled
+                    #any block details if enabled
                     if 'block' in r['data'] and self.config['show_rir_blocks']:
-                        query.add(Item(
+                        query.add(StandardItem(
                         id = "block",
                         text = "IP Block {resource} - {desc}".format(**r['data']['block']),
                         subtext = r['data']['block']['name'],
-                        icon=[icon_default],
+                        iconUrls=self.icon_default,
                         actions = [
                             Action("clip","Copy "+r['data']['block']['resource'], lambda v=r['data']['block']['resource']: setClipboardText(v)),
                             Action("clip","Copy "+r['data']['block']['name'], lambda v=r['data']['block']['name']: setClipboardText(v)),
@@ -436,11 +431,11 @@ class Plugin(QueryHandler):
                         for name,url in self.config['asn_url'].items():
                             actions.append(Action("url","Open {}".format(name),lambda u=url.format(asn['asn']): openUrl(u)))
 
-                        query.add(Item(
+                        query.add(StandardItem(
                             id = "auth",
                             text = "AS{asn}: {holder}".format(**asn),
                             subtext = "announced by ^",
-                            icon=[icon_default],
+                            iconUrls=self.icon_default,
                             actions = actions
                         ))
                               
@@ -461,9 +456,9 @@ class Plugin(QueryHandler):
 
                                         #assing a icon for some wellknown objects
                                         if record[0]['key'] in self.config['famous_objects']:
-                                            record_icon = plugin_root+"/icon/"+record[0]['key']+".svg"
+                                            record_icon = [f"file:{Path(__file__).parent}/icon/"+record[0]['key']+".svg"]
                                         else:
-                                            record_icon = plugin_root+"/icon/whois.svg"
+                                            record_icon = [f"file:{Path(__file__).parent}/icon/whois.svg"]
 
                                         for line in record:
                                             #setup a whois like string
@@ -494,11 +489,11 @@ class Plugin(QueryHandler):
 
                                         actions.insert(0,Action("clip-object","Copy '{key}' Whois Object".format(**record[0]), lambda v=whois_str: setClipboardText(v)))
 
-                                        query.add(Item(
+                                        query.add(StandardItem(
                                         id = record[0]['key'],
                                         text =  "{key}: {value}".format(**record[0]),
                                         subtext = whois_substr,
-                                        icon=[record_icon],
+                                        iconUrls=record_icon,
                                         actions = actions))
 
             else:
@@ -510,14 +505,15 @@ class Plugin(QueryHandler):
                     for record in r['data']['categories']:
                         for item in record['suggestions']:
                             actions = []
-                            actions.append(Action("clip","Copy '{value}' whois Object".format(**item), lambda: setClipboardText(item['value'])))
                             if 'link' in item:
-                                actions.append(Action("url","Open URL",lambda: openUrl(item['link'])))
+                                actions.append(Action("url","Open URL",lambda: openUrl(f"https://www.ripe.net/{item['link']}")))
+                            actions.append(Action("clip","Copy '{value}' whois Object".format(**item), lambda: setClipboardText(item['value'])))
 
-                            query.add(Item(
+                            query.add(StandardItem(
                             id = md_id,
                             text =  item['value'],
                             subtext = item['description'],
-                            completion = md_id+ " "+ item['value'],
-                            icon=[icon_default],
+                            # completion = md_id+ " "+ item['value'],
+                            iconUrls=self.icon_default,
                             actions = actions))
+

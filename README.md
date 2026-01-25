@@ -52,4 +52,4 @@ git clone https://github.com/Bierchermuesli/albert-ripe.git  ~/.local/share/albe
 
 ## RIPE API
 
-Please read https://stat.ripe.net/docs/02.data-api/ for usage and limitation. [ NOT APPROVED YET]
+Please read https://stat.ripe.net/docs/02.data-api/ for usage and limitation. 

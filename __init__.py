@@ -8,12 +8,11 @@ import requests
 import re
 import yaml
 from ipaddress import ip_network, ip_address, IPv4Address, IPv6Address
-import threading
 from dns import resolver
 from pathlib import Path
 
 md_iid = "5.0"
-md_version = "2.3"
+md_version = "2.4"
 md_name = "RIPE-Whois"
 md_description = "whois like lookup with RIPE API"
 md_license = "MIT"
@@ -23,14 +22,14 @@ md_authors = ["@Bierchermuesli"]
 md_lib_dependencies = ["requests", "pyyaml", "dnspython"]
 
 
-class Plugin(PluginInstance, TriggerQueryHandler):
+class Plugin(PluginInstance, GeneratorQueryHandler):
     # --- private attributes
     _api_timeout = 1.5
     _show_rir_blocks = True
     _show_ptr = True
 
     def __init__(self):
-        TriggerQueryHandler.__init__(self)
+        GeneratorQueryHandler.__init__(self)
         PluginInstance.__init__(self)
         
         self.icon_path = Path(__file__).parent / "icon.svg"
@@ -103,7 +102,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             },
             {"type": "checkbox", "label": "Show RIR block details", "property": "show_rir_blocks"},
             {"type": "checkbox", "label": "Show PTR records for IP addresses", "property": "show_ptr"},
-            {"type": "label", "text": f"For advanced configuration (custom URLs, etc.), copy <a href=\"{Path(__file__).parent.joinpath("config-defaults.yaml")}\">config-defaults.yaml</a> to a NEW <a href=\"{self.configLocation() / 'config.yaml'}\">file config.yaml</a> and adjust for your needs."},
+            {"type": "label", "text": f"For advanced configuration (custom URLs, etc.), copy <a href=\"{Path(__file__).parent.joinpath('config-defaults.yaml')}\">config-defaults.yaml</a> to <a href=\"{self.configLocation() / 'config.yaml'}\">{self.configLocation() / 'config.yaml'}</a> and adjust for your needs."},
         ]
 
     def defaultTrigger(self):
@@ -146,18 +145,13 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 return str(icon)
         return str(self.icon_path)
 
-    def handleTriggerQuery(self, query):
-        if not query.isValid:
+    def items(self, ctx):
+        if not ctx.query:
             return
 
-        # Run the search in a background thread
-        thread = threading.Thread(target=self._run_search, args=(query,))
-        thread.start()
-
-    def _run_search(self, query: Query):
         results = []
         try:
-            search_term = query.string.strip()
+            search_term = ctx.query.strip()
             if asn_match := self.as_regex.match(search_term):
                 results = self._handle_asn_query(asn_match.group('asn'))
             elif prefix := self.is_prefix_or_address(search_term):
@@ -169,11 +163,11 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id=md_name,
                 text="An unexpected error occurred",
                 subtext=str(e),
-                icon_factory=lambda: makeImageIcon(self._get_icon("error"))
+                icon_factory=lambda: Icon.image(self._get_icon("error"))
             ))
         
-        if query.isValid:
-            query.add(results)
+        if ctx.isValid:
+            yield results
 
     def _handle_asn_query(self, asn_str: str):
         items = []
@@ -204,7 +198,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="private_asn",
                 text=private_info['text'],
                 subtext=private_info.get('subtext', ''),
-                icon_factory=lambda: makeImageIcon(self._get_icon()),
+                icon_factory=lambda: Icon.image(self._get_icon()),
                 actions=actions
             ))
             return items
@@ -213,7 +207,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         overview_data = self.ripe_api("as-overview", f"as{asn}")
         if overview_data.get('messages'):
             for m in overview_data['messages']:
-                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: makeImageIcon(self._get_icon("error"))))
+                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
         
         if overview_data.get('status_code') != 200:
             return items
@@ -228,7 +222,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="as_overview",
                 text=f"AS{data['resource']} - {data['holder']}",
                 subtext="Announced" if data.get('announced') else "Not Announced",
-                icon_factory=lambda: makeImageIcon(self._get_icon()),
+                icon_factory=lambda: Icon.image(self._get_icon()),
                 actions=actions
             ))
 
@@ -238,7 +232,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                     id="rir_block",
                     text=f"AS Block {block['resource']} - {block['desc']}",
                     subtext=block['name'],
-                    icon_factory=lambda: makeImageIcon(self._get_icon()),
+                    icon_factory=lambda: Icon.image(self._get_icon()),
                     actions=[
                         Action("clip_block_res", f"Copy {block['resource']}", lambda v=block['resource']: setClipboardText(v)),
                         Action("clip_block_name", f"Copy {block['name']}", lambda v=block['name']: setClipboardText(v)),
@@ -270,7 +264,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                     id=key,
                     text=f"{record[0].get('key', '')}: {record[0].get('value', '')}",
                     subtext=whois_substr.strip(),
-                    icon_factory=lambda i=icon: makeImageIcon(i),
+                    icon_factory=lambda i=icon: Icon.image(i),
                     actions=actions
                 ))
         
@@ -312,7 +306,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             
             items.append(StandardItem(
                 id="private_prefix", text=private_info['text'], subtext=private_info.get('subtext', ''),
-                icon_factory=lambda: makeImageIcon(self._get_icon()), actions=actions
+                icon_factory=lambda: Icon.image(self._get_icon()), actions=actions
             ))
             return items
 
@@ -322,7 +316,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 if ptr_record := str(resolver.query(prefix.reverse_pointer, "PTR")[0]):
                     items.append(StandardItem(
                         id="ptr", text=ptr_record, subtext=prefix.reverse_pointer,
-                        icon_factory=lambda: makeImageIcon(self._get_icon("ptr")),
+                        icon_factory=lambda: Icon.image(self._get_icon("ptr")),
                         actions=[
                             Action("clip_ptr", f"Copy {ptr_record}", lambda v=ptr_record: setClipboardText(v)),
                             Action("clip_rev", f"Copy {prefix.reverse_pointer}", lambda v=prefix.reverse_pointer: setClipboardText(v))
@@ -335,7 +329,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         overview_data = self.ripe_api("prefix-overview", str(prefix))
         if overview_data.get('messages'):
             for m in overview_data['messages']:
-                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: makeImageIcon(self._get_icon("error"))))
+                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
         
         if overview_data.get('status_code') != 200:
             return items
@@ -350,7 +344,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="prefix_overview",
                 text=data['resource'],
                 subtext="Announced" if data.get('announced') else "Not Announced",
-                icon_factory=lambda: makeImageIcon(self._get_icon()),
+                icon_factory=lambda: Icon.image(self._get_icon()),
                 actions=actions
             ))
 
@@ -358,7 +352,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 block = data['block']
                 items.append(StandardItem(
                     id="rir_block", text=f"IP Block {block['resource']} - {block['desc']}", subtext=block['name'],
-                    icon_factory=lambda: makeImageIcon(self._get_icon()),
+                    icon_factory=lambda: Icon.image(self._get_icon()),
                     actions=[
                         Action("clip_block_res", f"Copy {block['resource']}", lambda v=block['resource']: setClipboardText(v)),
                         Action("clip_block_name", f"Copy {block['name']}", lambda v=block['name']: setClipboardText(v)),
@@ -375,7 +369,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 
                 items.append(StandardItem(
                     id=f"auth_as_{asn['asn']}", text=f"AS{asn['asn']}: {asn['holder']}", subtext="Authoritative ASN",
-                    icon_factory=lambda: makeImageIcon(self._get_icon()), actions=asn_actions
+                    icon_factory=lambda: Icon.image(self._get_icon()), actions=asn_actions
                 ))
 
         whois_data = self.ripe_api("whois", str(prefix))
@@ -398,7 +392,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 
                 items.append(StandardItem(
                     id=key, text=f"{record[0].get('key', '')}: {record[0].get('value', '')}", subtext=whois_substr.strip(),
-                    icon_factory=lambda i=icon: makeImageIcon(i), actions=actions
+                    icon_factory=lambda i=icon: Icon.image(i), actions=actions
                 ))
 
         return items
@@ -408,7 +402,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         data = self.ripe_api("searchcomplete", search_term)
         if data.get('messages'):
             for m in data['messages']:
-                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: makeImageIcon(self._get_icon("error"))))
+                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
             return items
         if 'data' in data:
             for category in data['data'].get('categories', []):
@@ -422,7 +416,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                         id=md_name,
                         text=suggestion.get('value'),
                         subtext=suggestion.get('description'),
-                        icon_factory=lambda: makeImageIcon(self._get_icon()),
+                        icon_factory=lambda: Icon.image(self._get_icon()),
                         actions=actions
                     ))
         return items

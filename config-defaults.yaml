@@ -4,7 +4,7 @@
 
 asn_url:
  bgp.tools: https://bgp.tools/as/{}
- HE.net Toolkit: https:// bgp.he.net/{}
+ HE.net Toolkit: https://bgp.he.net/{}
  PeeringDB: https://www.peeringdb.com/search?q={}
  CF RPKI: https://rpki.cloudflare.com/?view=bgp&asn={}
  IRR Explorer: https://irrexplorer.nlnog.net/asn/AS{}
@@ -12,7 +12,6 @@ prefix_url:
  CloudFlare RPKI: https://rpki.cloudflare.com/?view=bgp&prefix={}
  bgp.tools: https://bgp.tools/prefix/{}
  HE.net Toolkit: https://bgp.he.net/net/{}
- CF RPKI: https://rpki.cloudflare.com/?view=bgp&prefix={}
  IRR Explorer: https://irrexplorer.nlnog.net/prefix/{}
  Telia LG: https://lg.twelve99.net/?type=bgp&router=zch-b1&address={}
 

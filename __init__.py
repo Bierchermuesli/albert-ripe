@@ -6,13 +6,19 @@ Synopsis: <trigger> ASN/Prefix
 from albert import *
 import requests
 import re
+import shutil
+import subprocess
+import time
 import yaml
 from ipaddress import ip_network, ip_address, IPv4Address, IPv6Address
 from dns import resolver
 from pathlib import Path
 
+LIVE_DEBOUNCE_SECONDS = 0.4
+ASN_MAX = 4294967295  # 32-bit ASN upper bound (RFC 6793)
+
 md_iid = "5.0"
-md_version = "2.4"
+md_version = "2.5"
 md_name = "RIPE-Whois"
 md_description = "whois like lookup with RIPE API"
 md_license = "MIT"
@@ -33,7 +39,7 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         PluginInstance.__init__(self)
         
         self.icon_path = Path(__file__).parent / "icon.svg"
-        self.as_regex = re.compile('^(?:as)?(?P<asn>\\d{2,6})$', re.IGNORECASE)
+        self.as_regex = re.compile('^(?:as)?(?P<asn>\\d{1,10})$', re.IGNORECASE)
         
         self._init_configuration()
 
@@ -145,39 +151,81 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
                 return str(icon)
         return str(self.icon_path)
 
+    def _add_to_copyq(self, text: str, label: str):
+        if not shutil.which("copyq"):
+            Notification(title="RIPE", text="copyq not installed; falling back to clipboard").send()
+            setClipboardText(text)
+            return
+        note = f"ripe:{label}" if label else "ripe"
+        try:
+            subprocess.run(
+                ["copyq", "write", "0",
+                 "application/x-copyq-item-notes", note,
+                 "text/plain", text],
+                check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            Notification(title="RIPE", text=f"Added to CopyQ history\n{text[:200]}").send()
+        except Exception as e:
+            warning(f"RIPE: copyq add failed: {e}")
+            setClipboardText(text)
+
     def items(self, ctx):
         if not ctx.query:
             return
 
+        search_term = ctx.query.strip()
+        if not search_term:
+            return
+
+        # Debounce: each keystroke would otherwise fire a RIPE HTTP request
+        # (and a PTR DNS lookup for IPs). Yield a placeholder, sleep, then
+        # bail if the query has already moved on.
+        yield [StandardItem(
+            id="ripe-loading",
+            text="Looking up...",
+            subtext="stat.ripe.net",
+            icon_factory=lambda: Icon.image(self._get_icon()),
+        )]
+        time.sleep(LIVE_DEBOUNCE_SECONDS)
+        if not ctx.isValid:
+            return
+
         results = []
         try:
-            search_term = ctx.query.strip()
             if asn_match := self.as_regex.match(search_term):
-                results = self._handle_asn_query(asn_match.group('asn'))
+                asn = int(asn_match.group('asn'))
+                if 1 <= asn <= ASN_MAX:
+                    results = self._handle_asn_query(asn)
+                else:
+                    results = self._handle_general_search(search_term)
             elif prefix := self.is_prefix_or_address(search_term):
                 results = self._handle_prefix_query(prefix)
             else:
                 results = self._handle_general_search(search_term)
         except Exception as e:
             results.append(StandardItem(
-                id=md_name,
+                id="ripe-error",
                 text="An unexpected error occurred",
                 subtext=str(e),
                 icon_factory=lambda: Icon.image(self._get_icon("error"))
             ))
-        
+
         if ctx.isValid:
             yield results
 
-    def _handle_asn_query(self, asn_str: str):
+    def _handle_asn_query(self, asn: int):
         items = []
-        asn = int(asn_str)
-        
+
         # --- Handle private/reserved ASNs ---
         private_info = None
         if asn in self.config.get('custom_as', {}):
-            private_info = self.config['custom_as'][asn]
-            private_info['text'] = private_info.get('name')
+            custom = self.config['custom_as'][asn]
+            private_info = {
+                'text': custom.get('name'),
+                'subtext': custom.get('info', ''),
+                'url': custom.get('url', ''),
+            }
         elif asn == 23456:
             private_info = {'text': "AS_TRANS RFC6793", 'subtext': "2 to 4 byte ASN migrations", 'url': ''}
         elif asn in range(64496, 64512) or asn in range(65536, 65552):
@@ -206,9 +254,9 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         # --- Query RIPE API ---
         overview_data = self.ripe_api("as-overview", f"as{asn}")
         if overview_data.get('messages'):
-            for m in overview_data['messages']:
-                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
-        
+            for i, m in enumerate(overview_data['messages']):
+                items.append(StandardItem(id=f"asn_msg_{i}", text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
+
         if overview_data.get('status_code') != 200:
             return items
 
@@ -257,9 +305,12 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
                         whois_substr += f"{line.get('value', '')} "
                         if line.get('key') != 'source':
                             actions.append(Action(f"clip_{line.get('key')}", f"Copy {line.get('value')}", lambda v=line.get('value'): setClipboardText(v)))
-                
+
+                copyq_label = f"AS{asn} {record[0].get('key', '')}:{record[0].get('value', '')}"
                 actions.insert(0, Action("clip_object", "Copy Whois Object", lambda w=whois_str: setClipboardText(w)))
-                
+                actions.insert(1, Action("copyq_object", "Add Whois to CopyQ history",
+                                         lambda w=whois_str, l=copyq_label: self._add_to_copyq(w, l)))
+
                 items.append(StandardItem(
                     id=key,
                     text=f"{record[0].get('key', '')}: {record[0].get('value', '')}",
@@ -267,7 +318,7 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
                     icon_factory=lambda i=icon: Icon.image(i),
                     actions=actions
                 ))
-        
+
         return items
 
 
@@ -313,7 +364,8 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         # --- Query PTR Record ---
         if self.show_ptr and isinstance(prefix, (IPv4Address, IPv6Address)):
             try:
-                if ptr_record := str(resolver.query(prefix.reverse_pointer, "PTR")[0]):
+                answers = resolver.resolve(prefix.reverse_pointer, "PTR", lifetime=self.api_timeout)
+                if ptr_record := str(answers[0]):
                     items.append(StandardItem(
                         id="ptr", text=ptr_record, subtext=prefix.reverse_pointer,
                         icon_factory=lambda: Icon.image(self._get_icon("ptr")),
@@ -328,8 +380,8 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         # --- Query RIPE API ---
         overview_data = self.ripe_api("prefix-overview", str(prefix))
         if overview_data.get('messages'):
-            for m in overview_data['messages']:
-                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
+            for i, m in enumerate(overview_data['messages']):
+                items.append(StandardItem(id=f"prefix_msg_{i}", text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
         
         if overview_data.get('status_code') != 200:
             return items
@@ -387,9 +439,12 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
                         whois_substr += f"{line.get('value', '')} "
                         if line.get('key') != 'source':
                             actions.append(Action(f"clip_{line.get('key')}", f"Copy {line.get('value')}", lambda v=line.get('value'): setClipboardText(v)))
-                
+
+                copyq_label = f"{prefix} {record[0].get('key', '')}:{record[0].get('value', '')}"
                 actions.insert(0, Action("clip_object", "Copy Whois Object", lambda w=whois_str: setClipboardText(w)))
-                
+                actions.insert(1, Action("copyq_object", "Add Whois to CopyQ history",
+                                         lambda w=whois_str, l=copyq_label: self._add_to_copyq(w, l)))
+
                 items.append(StandardItem(
                     id=key, text=f"{record[0].get('key', '')}: {record[0].get('value', '')}", subtext=whois_substr.strip(),
                     icon_factory=lambda i=icon: Icon.image(i), actions=actions
@@ -401,22 +456,23 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         items = []
         data = self.ripe_api("searchcomplete", search_term)
         if data.get('messages'):
-            for m in data['messages']:
-                items.append(StandardItem(id=md_name, text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
+            for i, m in enumerate(data['messages']):
+                items.append(StandardItem(id=f"search_msg_{i}", text=m[0], subtext=m[1], icon_factory=lambda: Icon.image(self._get_icon("error"))))
             return items
         if 'data' in data:
+            counter = 0
             for category in data['data'].get('categories', []):
                 for suggestion in category.get('suggestions', []):
-                    actions = [] # Initialize actions list here
+                    actions = []
                     if 'link' in suggestion:
                         actions.append(Action("url", "Open on ripe.net", lambda l=suggestion['link']: openUrl(f"https://www.ripe.net{l}")))
-                    # Always append copy action, after URL action if it exists
                     actions.append(Action("clip", f"Copy {suggestion['value']}", lambda v=suggestion['value']: setClipboardText(v)))
                     items.append(StandardItem(
-                        id=md_name,
+                        id=f"search_{counter}",
                         text=suggestion.get('value'),
                         subtext=suggestion.get('description'),
                         icon_factory=lambda: Icon.image(self._get_icon()),
                         actions=actions
                     ))
+                    counter += 1
         return items

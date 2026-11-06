@@ -179,14 +179,9 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
             return
 
         # Debounce: each keystroke would otherwise fire a RIPE HTTP request
-        # (and a PTR DNS lookup for IPs). Yield a placeholder, sleep, then
-        # bail if the query has already moved on.
-        yield [StandardItem(
-            id="ripe-loading",
-            text="Looking up...",
-            subtext="stat.ripe.net",
-            icon_factory=lambda: Icon.image(self._get_icon()),
-        )]
+        # (and a PTR DNS lookup for IPs). Sleep, then bail if the query has
+        # already moved on. No placeholder: Albert appends later batches
+        # instead of replacing it, or fetches them only on scrolling.
         time.sleep(LIVE_DEBOUNCE_SECONDS)
         if not ctx.isValid:
             return
